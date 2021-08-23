@@ -1,0 +1,18 @@
+info:
+  contact: {}
+paths:
+  /health-check:
+    get:
+      description: Method used by the application load balancer to check the status
+        of the application
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Health Check
+      tags:
+      - Internal
+swagger: "2.0"

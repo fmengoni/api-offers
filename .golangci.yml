@@ -1,0 +1,29 @@
+run:
+  deadline: 5m
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+  govet:
+    check-shadowing: true
+  golint:
+    min-confidence: 0
+  gocyclo:
+    min-complecity: 10
+
+linters:
+  enable-all: true
+  disable:
+    - lll
+    - gochecknoglobals
+    - dupl
+    - maligned
+    - gochecknoinits
+    - gosec
+    - gofumpt
+    - godot 
+    - gci
+    - goerr113
+    - exhaustivestruct
+    - testpackage

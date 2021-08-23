@@ -1,0 +1,23 @@
+---
+app:
+  appPath: /geo
+mongo:
+  url: mongodb://AdminBasset:jury-steward-ditty-sleuth-smelter-appellee@10.192.4.242:27017
+  db: geo_expedia
+  dbV1: geo
+  airportsTableV1: airport
+  airportsTable: airports
+  geoCoordinatesTable: geo_coordinates
+  citiesTable: city
+  countryTable: country
+  statesTable: state
+  neighbourhoodsTable: neighbourhood
+  geoEntitiesTable: entity
+  accommodationTable: accommodation
+newRelic:
+  appName: api-geo
+  licenseKey: 1bb55c167a9cd56851acc0e1225fb9a92a43dd7c
+logger:
+  token: JCZregevjUptboKqESVRRsLlOXQqYVZZ
+  appName: api-geo
+  level: debug

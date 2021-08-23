@@ -1,0 +1,205 @@
+# Golang CircleCI 2.0 configuration file
+#
+# Check https://circleci.com/docs/2.0/language-go/ for more details
+version: 2
+jobs:
+  lint:
+    docker:
+      - image: circleci/golang:1.16
+    working_directory: /go/src/github.com/basset-la/api-geo
+    steps:
+      - checkout
+      - run: echo 'export GO111MODULE=on' >> $BASH_ENV
+      - run: git config --global url."${GITHUB_TOKEN}".insteadOf "https://github.com/"
+      - run: go get
+      - run: curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s v1.32.2
+      - run: ./bin/golangci-lint run --fast ./...
+  test:
+    docker:
+      - image: circleci/golang:1.16
+    working_directory: /go/src/github.com/basset-la/api-geo
+    steps:
+      - checkout
+      - run: git config --global url."${GITHUB_TOKEN}".insteadOf "https://github.com/"
+      - run: GO111MODULE=on go test -v ./...
+  build:
+    docker:
+      - image: circleci/golang:1.16
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Setting up environment variables
+          command: |
+            if [ "${CIRCLE_TAG}" != "" ]; then
+              echo 'export VERSION=$(echo "${CIRCLE_TAG}" | tr '.' '-')' >> $BASH_ENV
+            else 
+              echo 'export VERSION=$(echo "${CIRCLE_SHA1}" | cut -c 1-7)' >> $BASH_ENV
+            fi
+      - run:
+          name: Build image
+          command: |
+            docker build --build-arg githubToken="${GITHUB_TOKEN}" --build-arg version=$VERSION -t api-geo:$VERSION .
+      - run:
+          name: Save image to an archive
+          command: |
+            mkdir docker-image
+            docker save -o docker-image/image.tar api-geo:$VERSION
+      - persist_to_workspace:
+          root: .
+          paths:
+            - docker-image
+  deploy_dev:
+    docker:
+      - image: circleci/python:3.6.1
+    environment:
+      AWS_DEFAULT_OUTPUT: json
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Setting up environment variables
+          command: |
+            echo 'export VERSION=$(echo "${CIRCLE_SHA1}" | cut -c 1-7)' >> $BASH_ENV
+      - attach_workspace:
+          at: workspace
+      - restore_cache:
+          key: v1-awscli-terraform-0.11.10
+      - run:
+          name: Install awscli
+          command: |
+            python3 -m venv venv
+            . venv/bin/activate
+            pip install awscli
+      - run:
+          name: Install terraform
+          command: |
+            if [ ! -e terraform/terraform ]; then
+              wget https://releases.hashicorp.com/terraform/0.11.10/terraform_0.11.10_linux_amd64.zip
+              unzip terraform_0.11.10_linux_amd64.zip -d terraform
+            fi
+      - save_cache:
+          key: v1-awscli-terraform-0.11.10
+          paths:
+            - "venv"
+      - run:
+          name: Load image and run terraform plan
+          command: |
+            . venv/bin/activate
+            # Login to elastic container registry (aws)
+            eval $(aws ecr get-login --no-include-email --region us-east-1)
+
+            docker load --input workspace/docker-image/image.tar
+
+            # Go to env scripts folder
+            cd env/development
+            # Init terraform
+            ../../terraform/terraform init
+            # Apply terraform plan
+            ../../terraform/terraform apply -auto-approve -var app_version=$VERSION  -var priority=101
+  deploy_prod:
+    docker:
+      - image: circleci/python:3.6.1
+    environment:
+      AWS_DEFAULT_OUTPUT: json
+    steps:
+      - checkout
+      - setup_remote_docker
+      - run:
+          name: Setting up environment variables
+          command: |
+            echo 'export VERSION=$(echo "${CIRCLE_TAG}" | tr '.' '-')' >> $BASH_ENV
+      - attach_workspace:
+          at: workspace
+      - restore_cache:
+          key: v1-awscli-terraform-0.11.10
+      - run:
+          name: Install awscli
+          command: |
+            python3 -m venv venv
+            . venv/bin/activate
+            pip install awscli
+      - run:
+          name: Install terraform
+          command: |
+            if [ ! -e terraform/terraform ]; then
+              wget https://releases.hashicorp.com/terraform/0.11.10/terraform_0.11.10_linux_amd64.zip
+              unzip terraform_0.11.10_linux_amd64.zip -d terraform
+            fi
+      - save_cache:
+          key: v1-awscli-terraform-0.11.10
+          paths:
+            - "venv"
+      - run:
+          name: Load image and run terraform plan
+          command: |
+            . venv/bin/activate
+            # Login to elastic container registry (aws)
+            eval $(aws ecr get-login --no-include-email --region us-east-1)
+
+            docker load --input workspace/docker-image/image.tar
+
+            # Go to env scripts folder
+            cd env/production
+            # Init terraform
+            ../../terraform/terraform init
+            # Apply terraform plan
+            ../../terraform/terraform apply -auto-approve -var app_version=$VERSION -var priority=101
+      - run:
+          name: Send data to new relic
+          command: |
+            APP_ID=95858701
+            USER="${CIRCLE_USERNAME}"
+            curl -v -X POST 'https://api.newrelic.com/v2/applications/'$APP_ID'/deployments.json' \
+            -H 'X-Api-Key:'09a21d87814cbb1be93520ed6deff964379e7a47e9c182c -i \
+            -H 'Content-Type: application/json' \
+            -d \
+            '{
+              "deployment": {
+                "revision": "'$VERSION'",
+                "changelog": "string",
+                "description": "string",
+                "user": "'$USER'"
+              }
+            }'
+
+workflows:
+  version: 2
+  lint-test-build-deploy:
+    jobs:
+      - lint:
+          context: aws_cli
+          filters:
+            tags:
+              only: /^v.*/
+      - test:
+          context: aws_cli
+          filters:
+            tags:
+              only: /^v.*/
+      - build:
+          context: aws_cli
+          requires:
+            - lint
+            - test
+          filters:
+            branches:
+              only: develop
+            tags:
+              only: /^v.*/
+      - deploy_dev:
+          context: aws_cli
+          requires:
+            - build
+          filters:
+            branches:
+              only: develop
+      - deploy_prod:
+          context: aws_cli
+          requires:
+            - build
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
